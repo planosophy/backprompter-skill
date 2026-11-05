@@ -141,13 +141,21 @@ replies.
 
 ## Talking to an agent from a browser
 
-Install the browser SDK from the CDN, or `npm i backprompter` for a bundler.
+Load the browser SDK from its CDN with a script tag. It is not on npm, so there
+is nothing to install; it sets the global `Backprompter`.
+
+```html
+<script src="https://backprompter-sdk.pages.dev/backprompter-full.min.js"></script>
+```
 
 ```js
 Backprompter.setAppKey('<App Key from the Deploy dialog>');
 await Backprompter.signInAnonymously();          // or signIn / signInWithGoogle
-const { response } = await Backprompter.run({ message: 'Hello' });
+const { response } = await Backprompter.run({ userPrompt: 'Hello' });
 ```
+
+The message goes in `userPrompt`; `run` throws without it. Add `agentId` to call
+one agent directly instead of letting the router choose.
 
 What the SDK exposes, by area:
 
@@ -211,7 +219,7 @@ The server SDK has one method.
 ```js
 import BackprompterServer from 'backprompter-server';
 const bp = new BackprompterServer({ apiKey: process.env.BP_API_KEY, tenantId: '<App Key>' });
-const { response } = await bp.run({ message: 'Hello', agentId: 'policy-answers' });
+const { response } = await bp.run({ userPrompt: 'Hello', agentId: 'policy-answers' });
 ```
 
 It calls `POST /public/run` with an `x-bp-api-key` header. Keys are created in
