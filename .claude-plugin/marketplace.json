@@ -1,0 +1,13 @@
+{
+  "name": "planosophy",
+  "owner": {
+    "name": "Planosophy LLC"
+  },
+  "plugins": [
+    {
+      "name": "backprompter",
+      "source": "./plugins/backprompter",
+      "description": "Teaches Claude how to build apps on Backprompter: agent JSON, the browser and server SDKs, RAG, tools, MCP, combo agents and payments."
+    }
+  ]
+}
