@@ -224,11 +224,34 @@ What the SDK exposes, by area:
 - **app data** — `getData`, `deleteData`, `search` (vector search over conversations and artifacts)
 - **files** — `getPromptFileType`, `extractPromptFileText`, `readPromptFileAsDataUrl`, `buildPromptWithFiles`
 - **voice** — `connectVoice`, `createVoiceAgent`
-- **payments** — `getEntitlements`, `createCheckoutSession`
+- **payments** — `getEntitlements`, `createCheckoutSession`, `createBillingPortalSession`
 
-Payments are **browser-only**, and deliberately: `createCheckoutSession` returns
-a URL to redirect to, and both payment calls act on the signed-in end user.
-Money goes to the developer's own connected Stripe account.
+Payments are **browser-only**, and deliberately: `createCheckoutSession` and
+`createBillingPortalSession` return a URL to redirect to, and every payment call
+acts on the signed-in end user. Money goes to the developer's own connected
+Stripe account.
+
+Give every paying user a way to manage their subscription. The billing portal
+is Stripe's own page for cancelling, resuming and changing cards; Backprompter
+sets it up on the developer's Stripe account, so there is nothing to configure.
+
+```js
+const { active, entitlement } = await Backprompter.getEntitlements();
+if (!active) {
+  const { url } = await Backprompter.createCheckoutSession({ successUrl, cancelUrl });
+  location.href = url;
+} else if (entitlement?.mode === 'subscription') {
+  // e.g. behind a "Manage subscription" button
+  const { url } = await Backprompter.createBillingPortalSession({ returnUrl: location.href });
+  location.href = url;
+}
+```
+
+- Cancelling takes effect at the end of the paid period, and access lasts until then.
+- `createCheckoutSession` refuses while the user still has access, so nobody pays twice. It also refuses while a renewal is failing (`code: 'payment_past_due'`); send that user to the billing portal to update their card.
+- The hosted chat already shows subscribers a Manage subscription button.
+- A user who cancels and later subscribes again keeps their saved card.
+- `createBillingPortalSession` fails until the user has paid at least once.
 
 ## Keeping your own login
 
@@ -362,14 +385,33 @@ agent; sources are never mixed.
   a side-by-side table of scores per mock user and topic.
 - A batch keeps running if the builder is closed; its progress shows under the
   ratings while it runs, with Cancel (chats under way finish, the rest are
-  skipped). Running out of credits stops it. Results, including past batches,
-  list each run's mock user, topic, turns and score; a run opens its
-  conversation and verdict, and the developer can add a 0-10 rating there.
+  skipped). Running out of credits stops it. If the servers restart meanwhile,
+  the batch pauses and continues the next time the builder is opened. Results,
+  including past batches, list each run's mock user, topic, turns, score and
+  speed; a run opens its conversation and verdict, with each reply's times and
+  tokens, and the developer can add a 0-10 rating there.
+- Batches measure reply speed; "Evaluate this chat" doesn't. Replies run
+  streamed, as in the chat. **Time to first text** runs from sending the message
+  to the first piece of the reply and doesn't depend on the reply's length.
+  **Reply time** runs to the complete reply. Both include routing, document
+  search and tool calls, and the batch shows each one's average and the time 95%
+  of replies came in under. **Throughput** is how fast the answer was written:
+  output tokens per second from its first text to its end, leaving out routing
+  and tool calls. Time to first text and throughput are blank for replies that
+  arrive in one piece (combo agents, forwarders, output other than chat). Mock
+  user and evaluator messages aren't counted. A batch comparing variants shows
+  each variant's speed. To find what is slow: a long time to first text with
+  normal throughput points to routing, retrieval, tool calls or a model slow to
+  start; low throughput points to the model.
 - Batch runs have only the evaluator's score, so they show in the ratings when
   the Scores picker is set to that evaluator. "View all evaluations" lists every
   saved evaluation, filterable by agent, version, evaluator and source, and
-  grouped by version with one average per evaluator; a row opens its
-  conversation.
+  grouped by version with one average per evaluator and the group's speed; a row
+  opens its conversation. Its columns for first text, average reply and tokens
+  per second can be sorted. **Download report** opens a report of the evaluations
+  shown (filters applied): each version's averages, then every evaluation with
+  its full verdict and the developer's note, ready to save as a PDF from the
+  print dialog.
 - Evaluators see, for each reply, the tools it called with a short copy of
   each call's input and result, the web pages it cited and documents it
   retrieved, and on Auto which agent answered, so an evaluator agent can
