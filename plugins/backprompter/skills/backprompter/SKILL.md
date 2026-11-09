@@ -119,11 +119,57 @@ an agent only references them by `toolRefs`. There are two kinds:
   the server offers *when it runs*, so tools the server adds later arrive within
   about 5 minutes; `mcp:<server>/<tool>` pins one tool.
 
+Each tool or server has an **Auth** choice: **Bearer token** (just the key,
+sent as `Authorization: Bearer <key>`; typing a key picks it), **Custom
+header**, **Query parameter**, or **No auth**. The key is stored encrypted.
+
 The model sees an MCP tool as `<server>__<tool>`. Ask the developer for the
 server name they used rather than guessing it. Only public https hosts are
 allowed, OAuth-only MCP servers can't be connected yet, and an agent gets up to
 5 rounds of tool calls per reply. Use a tool-calling model; small models invent
 arguments.
+
+## Forwarder agents
+
+A forwarder connects an agent the developer hosts elsewhere, behind an API tool
+or an MCP server, so Backprompter's evaluations, mock users, Auto, Slack and the
+SDK can talk to it without seeing its prompt. Set `"role": "forwarder"` and
+give it `toolRefs`:
+
+```json
+{
+  "name": "my-hosted-agent",
+  "summary": "Answers order and delivery questions.",
+  "role": "forwarder",
+  "instructions": "",
+  "model": "anthropic/claude-sonnet-4-5",
+  "toolRefs": ["mcp:myagent/chat"]
+}
+```
+
+- Each reply makes one model call and one tool call. The model fills in the
+  tool's arguments from the conversation (and, with several tools, picks one);
+  the tool's output is the reply, unchanged. The model never sees the output.
+- `instructions` is only an optional note on filling in the call or choosing
+  a tool, e.g. "Always set language to en."
+- Backprompter fills in the conversation itself, so the model doesn't have to
+  copy it: an argument named `messages` gets the whole chat as
+  `{role, content}` turns, the new message included; `history`,
+  `conversation`, `chat_history` or `conversation_history` get the earlier
+  turns only. A list argument gets a list; a text argument (all API-tool
+  parameters) gets it as JSON text. Name the tool's message argument
+  `message` so the model knows where the user's words go.
+- RAG, web search, web fetch, profile context, temperature, max tokens and
+  artifact type don't apply. A forwarder is never a combo, but it can be a
+  combo's sub-agent. Team policies can't shape its replies.
+- Forwarded calls wait up to 60 seconds, and replies are cut at 100,000
+  characters. An HTTP error comes back as the reply, with its status line.
+- The role is chosen when the agent is created and never changes: an existing
+  agent can't become a forwarder, and a forwarder can't become anything else.
+  So `"role"` is read only when an uploaded JSON creates a new agent; importing
+  it onto an existing agent as a version leaves the role as it was.
+- Billing: the usual per-message fee plus one model call to fill in the tool
+  call.
 
 ## Choosing a model
 
@@ -156,6 +202,18 @@ const { response } = await Backprompter.run({ userPrompt: 'Hello' });
 
 The message goes in `userPrompt`; `run` throws without it. Add `agentId` to call
 one agent directly instead of letting the router choose.
+
+To show the answer as it is written, pass `stream: true` with
+`onDelta(piece, textSoFar)` and optionally `onStatus(event)`. The call still
+resolves with the complete result, which is the text to keep. `onStatus` gets
+`meta` (which agent answers, and `streaming: false` when no text will stream),
+`status` (`routing`, `retrieving`, or `tool` with its `name`) and `reset` (text
+written before a tool call; clear it). Only chat answers stream: charts and
+other artifact types, combo agents, `genDiff` edits and forwarders arrive whole.
+The hosted chat streams by default; untick "Stream replies" in the Deploy dialog
+to turn it off. "Show intermediate steps" under it adds notes such as
+"Searching documents..." until the answer starts. The builder's test chat has its own pair of switches
+above the message box, to see answers the way streaming users will.
 
 What the SDK exposes, by area:
 
@@ -222,14 +280,17 @@ const bp = new BackprompterServer({ apiKey: process.env.BP_API_KEY, tenantId: '<
 const { response } = await bp.run({ userPrompt: 'Hello', agentId: 'policy-answers' });
 ```
 
-It calls `POST /public/run` with an `x-bp-api-key` header. Keys are created in
+It takes the same `stream: true` / `onDelta` / `onStatus` options as the
+browser SDK. It calls `POST /public/run` with an `x-bp-api-key` header. Keys are created in
 the builder, bound to one app, and capped at 10 active per app; the owner can
 revoke them in the Deploy dialog. The server SDK has no payments and no
 end-user auth — there is no signed-in user in that context.
 
-Agents only run for an app whose owner is on Dev Pro. Otherwise calls are
-refused with HTTP 402 and `code: "hobby_blocked"`; handle that rather than
-retrying.
+API keys need Dev Pro. A call is refused with HTTP 402 when the app's owner
+can't pay for it, for example when they are out of credits; handle that rather
+than retrying. In the builder, a free Hobby account gets up to 2 agents and a
+lifetime allowance of 50 messages or $1 of model usage, whichever comes first.
+It must verify its email first (HTTP 403, `code: "email_not_verified"`).
 
 ## Calling agents from MCP clients
 
@@ -248,6 +309,23 @@ knows that the client's model doesn't.
 - **Not offered:** `javascript` (code-execution) agents.
 - **Limits:** about 30 calls a minute per key. Backprompter agents calling
   other Backprompter agents over MCP may nest only one level.
+
+**One Backprompter agent calling another as a tool.** Exposed agents never
+appear in a tools picker by themselves, and there is no built-in
+`mcp:backprompter/...` ref. The calling app adds Backprompter's MCP server like
+any other:
+
+1. In the app with the agent: tick **Expose via MCP** on it and save, create an
+   API key (**🚀 Deploy** → *API access*), and copy the MCP endpoint shown under
+   *MCP server* in that dialog.
+2. In the calling app: **🧰 Tools** → **+ Add MCP server**, with a name (e.g.
+   `support_app`), that endpoint, Auth **Bearer token** and the key, then
+   **Save tools**. The card lists one tool per exposed agent.
+3. In the calling agent's Tools dropdown, tick the server or that one tool
+   (`mcp:support_app` or `mcp:support_app/<tool>`), and save.
+
+Within one app, use a combo agent instead; it needs no key. Each call is billed
+to both apps' owners: the caller's run and the called agent's run.
 
 ## Team policies
 
@@ -270,22 +348,49 @@ agent; sources are never mixed.
 - **Batch evaluate** runs many mock-user chats on the server and scores each
   one: pick the agent (or Auto), the evaluator, mock users, the number of runs,
   a range of turns per run (each run picks within it, 1 to 10; the form starts
-  at 2 to 6), and optional topics, one per line. Runs pair every mock user with
+  at 2 to 6), and optional topics, one per line (Suggest topics adds three
+  written for the app and agent). Runs pair every mock user with
   every topic. At most 200 turns per batch, one batch at a time per app. Each
   turn uses two messages and each run one more for the evaluator, all on the
   app owner's plan. It tests the version the test chat used when it started.
+- **Compare** in the batch form tests up to four variants of one agent: each is a
+  version (current, deployed, or a saved version) plus an optional model that
+  applies to this batch only and is never saved. Every variant gets the same
+  runs (mock user, topic, turns) and the same evaluator; the 200-turn limit
+  counts all of them. For a combo agent the model applies to the combo itself.
+  Auto takes no variants. Results show each variant's average (best marked) and
+  a side-by-side table of scores per mock user and topic.
 - A batch keeps running if the builder is closed; its progress shows under the
   ratings while it runs, with Cancel (chats under way finish, the rest are
   skipped). Running out of credits stops it. Results, including past batches,
   list each run's mock user, topic, turns and score; a run opens its
   conversation and verdict, and the developer can add a 0-10 rating there.
 - Batch runs have only the evaluator's score, so they show in the ratings when
-  the Scores picker is set to that evaluator. "View all evaluations" opens any
-  saved evaluation with its conversation.
+  the Scores picker is set to that evaluator. "View all evaluations" lists every
+  saved evaluation, filterable by agent, version, evaluator and source, and
+  grouped by version with one average per evaluator; a row opens its
+  conversation.
+- Evaluators see, for each reply, the tools it called with a short copy of
+  each call's input and result, the web pages it cited and documents it
+  retrieved, and on Auto which agent answered, so an evaluator agent can
+  score tool use or routing. Every evaluator, built-in or custom, also gets a
+  retrieval check: each reply's claims with the sentences from its documents and
+  tool results that might bear on them. The evaluator decides whether each claim
+  is supported, so its instructions needn't mention retrieval. Each reply with sources is one small extra model call at cost.
 - An evaluator agent should put its score on its own line, such as
   `Score: 8/10` (any scale, written as X/Y or "X out of Y"), so it can be read
   and averaged. Short verdicts make batches faster.
-- Prompt suggestions are not offered for Auto or combo agents.
+- Evaluators are agents with the Evaluator role: created with + in the
+  Evaluators box of the Evaluations section (starter prompt included) or by
+  setting Role in the agent editor (not versioned, takes effect at once). Only
+  evaluators and the built-in one are offered as evaluators; agent lists show
+  them under an "Evaluators" heading and they can still be tested. Auto never
+  routes to an evaluator. An uploaded agent JSON may carry `"role": "evaluator"`.
+  A forwarder can't be made an evaluator, and an evaluator can't become a
+  forwarder.
+- An evaluator judging a forwarder is told that its replies come from an agent
+  hosted elsewhere and that its internals aren't visible.
+- Prompt suggestions are not offered for Auto, combo or forwarder agents.
 
 ## Embedding the chat
 
