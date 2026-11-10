@@ -79,6 +79,18 @@ Mixing is allowed: several collections and several documents together. Their
 contexts are concatenated. A document kept in full is attached as a file rather
 than as text.
 
+Files can also be dragged onto the Files window to upload them.
+
+**Updating a file:** in the Files window, select the file and click **Replace…**,
+drag the new version onto that file in the list, or upload a file with the same
+name and choose to replace it. The file keeps its
+id, description and collection, so agents that use it, directly or through its
+collection, need no change. An indexed file is re-indexed in the background and
+the old version is searched until the new one is ready; if indexing fails, the
+old version stays. Replacing costs the same as uploading the file new, and a
+file attached whole can't grow past its size limit (index it first). Evaluations
+from before a replacement were run against the old version.
+
 Two behaviours worth designing around:
 
 **Retrieval is gated.** Before searching, a classifier decides whether the
