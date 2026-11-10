@@ -370,6 +370,13 @@ marked as overriding the agent's own instructions. Editors can't see them. You
 won't see them either, so if an agent ignores part of its instructions, a policy
 may be the reason. Don't write instructions that try to override owner rules.
 
+On an app shared with them, an editor builds like the owner (agents, files,
+tools, evaluations), but in the Deploy dialog only the owner can deploy or
+unpublish the chat, pay the production fee, create or revoke API keys, or set up
+Stripe payments. The dialog shows an editor a note naming the owner and dims
+those buttons; clicking one says who can do it. Editors can still manage secret
+codes and Slack. If an editor needs one of those, the answer is to ask the owner.
+
 ## Evaluating agents in the builder
 
 The builder's Evaluations section rates each agent, and Auto (the meta-router),
