@@ -321,11 +321,21 @@ the builder, bound to one app, and capped at 10 active per app; the owner can
 revoke them in the Deploy dialog. The server SDK has no payments and no
 end-user auth — there is no signed-in user in that context.
 
-API keys need Dev Pro. A call is refused with HTTP 402 when the app's owner
-can't pay for it, for example when they are out of credits; handle that rather
-than retrying. In the builder, a free Hobby account gets up to 2 agents and a
-lifetime allowance of 50 messages or $1 of model usage, whichever comes first.
-It must verify its email first (HTTP 403, `code: "email_not_verified"`).
+API keys need a paid plan (Developer or Enterprise). A call is refused with
+HTTP 402 when the app's owner can't pay for it, for example when they are out
+of credits; handle that rather than retrying.
+
+Plans: the **Free Trial** gets up to 2 agents and a lifetime allowance of 50
+messages or $1 of model usage, whichever comes first, and must verify its email
+first (HTTP 403, `code: "email_not_verified"`). It cannot deploy in any form
+(chat, API keys, MCP, Slack), invite teammates or set policies; those answer
+HTTP 402 with `code: "upgrade_required"`. **Developer** (monthly, from credits)
+lifts the limits, deploys, and invites up to 5 editors per app, with 10 batch
+evaluations a month. **Enterprise** (set up by Backprompter) adds auditors, 10
+collaborators per app by default, owner switches, and no batch limit. Accounts
+that were on Dev Pro are Enterprise; the old Hobby plan is the Free Trial.
+Prices and these numbers can change, so take current figures from the Billing
+window or the pricing page.
 
 ## Calling agents from MCP clients
 
@@ -370,12 +380,40 @@ marked as overriding the agent's own instructions. Editors can't see them. You
 won't see them either, so if an agent ignores part of its instructions, a policy
 may be the reason. Don't write instructions that try to override owner rules.
 
-On an app shared with them, an editor builds like the owner (agents, files,
-tools, evaluations), but in the Deploy dialog only the owner can deploy or
-unpublish the chat, pay the production fee, create or revoke API keys, or set up
-Stripe payments. The dialog shows an editor a note naming the owner and dims
-those buttons; clicking one says who can do it. Editors can still manage secret
-codes and Slack. If an editor needs one of those, the answer is to ask the owner.
+On Enterprise the owner can let editors and auditors read the policies (read
+only), from the Team window.
+
+## Teammates and roles
+
+An app has one owner; people invited (👥 Team) are **editors**, or on
+Enterprise also **auditors**. Everyone they run bills the owner.
+
+- Editors build like the owner (agents, files, tools, evaluations, secret codes,
+  Slack). They cannot deploy or unpublish the chat, pay the production fee,
+  create or revoke API keys, or set up Stripe payments, unless the owner is on
+  Enterprise and turned on **Editors can deploy** in the Team window (that
+  covers deploying and unpublishing the chat; whether it also covers keys, the
+  fee or Stripe is a Backprompter setting).
+- Auditors chat with the agents, evaluate them (single and batch, saved
+  versions included), view results, and keep their own mock users and
+  evaluator agents. They cannot change other agents, files, tools or settings,
+  deploy, or use "Suggest system prompt updates". Their refusals come back as
+  HTTP 403 with `code: "auditor_read_only"`.
+- Unless the owner turns on **Auditors can view agents, files and tools** in
+  the Team window, auditors see the other agents by name, summary, role and
+  model only: not their instructions or settings, not what saved versions
+  contain, and not the files, API tools or MCP servers (HTTP 403,
+  `code: "not_shared"`). They can still pick a saved version in Versions to
+  chat with and evaluate; Backprompter gives the evaluator the hidden
+  instructions itself and tells it not to repeat them. If an auditor asks you
+  for a prompt they can't see, you don't have it either; help them evaluate
+  instead.
+- Only the owner invites, removes, changes roles, sets policies and deletes the
+  app. How many people one app can have depends on the owner's plan.
+
+In the builder, locked buttons stay visible but dimmed, and clicking one says
+who can do it. If someone needs a locked action, the answer is to ask the owner
+(or, on the Free Trial, to upgrade).
 
 ## Evaluating agents in the builder
 
@@ -395,6 +433,9 @@ agent; sources are never mixed.
   every topic. At most 200 turns per batch, one batch at a time per app. Each
   turn uses two messages and each run one more for the evaluator, all on the
   app owner's plan. It tests the version the test chat used when it started.
+  On Developer the owner's account can start 10 batches a month (all apps and
+  teammates together; HTTP 402, `code: "batch_eval_limit"` past that, until
+  the 1st). Enterprise has no limit.
 - **Compare** in the batch form tests up to four variants of one agent: each is a
   version (current, deployed, or a saved version) plus an optional model that
   applies to this batch only and is never saved. Every variant gets the same
