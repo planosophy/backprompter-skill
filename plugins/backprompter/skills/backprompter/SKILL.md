@@ -49,7 +49,7 @@ Every field, and what it does:
 | `name` | string | Identifies the agent. Unique within the app. |
 | `summary` | string | How the router decides this agent fits a message. Write it as what the agent handles, not as praise. |
 | `instructions` | string | The system prompt. `__TIME_STRING__` is replaced with the current time. |
-| `model` | OpenRouter slug | Empty means `anthropic/claude-sonnet-4-5`. |
+| `model` | OpenRouter slug | Empty means `anthropic/claude-sonnet-4-5`. Must have a zero-data-retention provider on OpenRouter: every request asks for one, and a model without one fails with a message saying so. Browse the ones that do at https://openrouter.ai/models?zdr=true. |
 | `temperature` | 0–1 | Defaults to 0.7. |
 | `maxTokens` | number | Defaults to 3000. The builder's field caps at 4000. |
 | `artifactType` | `chat`, `markdown`, `html`, `charts`, `javascript` | `chat` is an ordinary reply. The others produce a document the app renders and can edit in place. |
@@ -104,7 +104,8 @@ its own agent rather than adding it alongside a large one.
 ## Combo agents
 
 A combo agent coordinates other agents. Set `isComboAgent: true` and list
-`subAgentIds`.
+`subAgentIds`. In the builder, mentioning an agent as `@name` in the
+instructions makes it a sub-agent.
 
 Three modes, chosen by the **first line of `instructions`**:
 
@@ -115,9 +116,25 @@ Three modes, chosen by the **first line of `instructions`**:
 For `parallel` and `serial`, list the sub-agents on the lines after the keyword
 to fix their order.
 
-**Limits that surprise people.** A combo's own `toolRefs`, `webSearch`,
-`webFetch` and `ragSources` are ignored — only its sub-agents get those. Combos
-cannot nest. The coordinator stops after 7 rounds.
+**How the coordinator works.** Each sub-agent is a tool the coordinator calls
+with an instruction. It can call several sub-agents in one step when their work
+is independent; they run at the same time. Each result comes back labelled
+`run_<n>`. The coordinator then writes the final answer, or passes one
+sub-agent's result to the user unchanged (useful for charts and HTML). A
+sub-agent receives its own instructions, the user's profile (unless its
+`userContext` is false), the conversation, what has happened in the
+coordination so far, the coordinator's instruction and the user's message, and
+it uses its own model, tools, web access and documents.
+
+The combo's own `toolRefs`, `webSearch`, `webFetch` and `ragSources` work too:
+the coordinator can use them alongside its sub-agents.
+
+**Limits.** Combos cannot nest (a combo used as a sub-agent answers as a plain
+agent). One reply allows 7 coordinator rounds and 12 calls in total (sub-agents
+and the combo's own tools). If the combo's model can't take tool calls (some
+image, search and older models on OpenRouter), the coordinator uses an older
+text format instead. In that case the combo's own tools, web access and
+documents are not used, and the builder shows a note under the model field.
 
 ## Tools
 
@@ -317,12 +334,12 @@ const { response } = await bp.run({ userPrompt: 'Hello', agentId: 'policy-answer
 
 It takes the same `stream: true` / `onDelta` / `onStatus` options as the
 browser SDK. It calls `POST /public/run` with an `x-bp-api-key` header. Keys are created in
-the builder, bound to one app, and capped at 10 active per app; the owner can
+the builder, bound to one app, and capped at 10 active per app; the admin can
 revoke them in the Deploy dialog. The server SDK has no payments and no
 end-user auth — there is no signed-in user in that context.
 
 API keys need a paid plan (Developer or Enterprise). A call is refused with
-HTTP 402 when the app's owner can't pay for it, for example when they are out
+HTTP 402 when the app's admin can't pay for it, for example when they are out
 of credits; handle that rather than retrying.
 
 Plans: the **Free Trial** gets up to 2 agents and a lifetime allowance of 50
@@ -332,7 +349,7 @@ first (HTTP 403, `code: "email_not_verified"`). It cannot deploy in any form
 HTTP 402 with `code: "upgrade_required"`. **Developer** (monthly, from credits)
 lifts the limits, deploys, and invites up to 5 editors per app, with 10 batch
 evaluations a month. **Enterprise** (set up by Backprompter) adds auditors, 10
-collaborators per app by default, owner switches, and no batch limit. Accounts
+collaborators per app by default, admin switches, and no batch limit. Accounts
 that were on Dev Pro are Enterprise; the old Hobby plan is the Free Trial.
 Prices and these numbers can change, so take current figures from the Billing
 window or the pricing page.
@@ -370,27 +387,27 @@ any other:
    (`mcp:support_app` or `mcp:support_app/<tool>`), and save.
 
 Within one app, use a combo agent instead; it needs no key. Each call is billed
-to both apps' owners: the caller's run and the called agent's run.
+to both apps' admins: the caller's run and the called agent's run.
 
 ## Team policies
 
-An app's owner can set guardrails for every agent and rules for evaluations.
+An app's admin can set guardrails for every agent and rules for evaluations.
 Backprompter puts them at the start of each agent's system prompt at run time,
 marked as overriding the agent's own instructions. Editors can't see them. You
 won't see them either, so if an agent ignores part of its instructions, a policy
-may be the reason. Don't write instructions that try to override owner rules.
+may be the reason. Don't write instructions that try to override admin rules.
 
-On Enterprise the owner can let editors and auditors read the policies (read
+On Enterprise the admin can let editors and auditors read the policies (read
 only), from the Team window.
 
 ## Teammates and roles
 
-An app has one owner; people invited (👥 Team) are **editors**, or on
-Enterprise also **auditors**. Everyone they run bills the owner.
+An app has one admin; people invited (👥 Team) are **editors**, or on
+Enterprise also **auditors**. Everyone they run bills the admin.
 
-- Editors build like the owner (agents, files, tools, evaluations, secret codes,
+- Editors build like the admin (agents, files, tools, evaluations, secret codes,
   Slack). They cannot deploy or unpublish the chat, pay the production fee,
-  create or revoke API keys, or set up Stripe payments, unless the owner is on
+  create or revoke API keys, or set up Stripe payments, unless the admin is on
   Enterprise and turned on **Editors can deploy** in the Team window (that
   covers deploying and unpublishing the chat; whether it also covers keys, the
   fee or Stripe is a Backprompter setting).
@@ -399,7 +416,7 @@ Enterprise also **auditors**. Everyone they run bills the owner.
   evaluator agents. They cannot change other agents, files, tools or settings,
   deploy, or use "Suggest system prompt updates". Their refusals come back as
   HTTP 403 with `code: "auditor_read_only"`.
-- Unless the owner turns on **Auditors can view agents, files and tools** in
+- Unless the admin turns on **Auditors can view agents, files and tools** in
   the Team window, auditors see the other agents by name, summary, role and
   model only: not their instructions or settings, not what saved versions
   contain, and not the files, API tools or MCP servers (HTTP 403,
@@ -408,11 +425,11 @@ Enterprise also **auditors**. Everyone they run bills the owner.
   instructions itself and tells it not to repeat them. If an auditor asks you
   for a prompt they can't see, you don't have it either; help them evaluate
   instead.
-- Only the owner invites, removes, changes roles, sets policies and deletes the
-  app. How many people one app can have depends on the owner's plan.
+- Only the admin invites, removes, changes roles, sets policies and deletes the
+  app. How many people one app can have depends on the admin's plan.
 
 In the builder, locked buttons stay visible but dimmed, and clicking one says
-who can do it. If someone needs a locked action, the answer is to ask the owner
+who can do it. If someone needs a locked action, the answer is to ask the admin
 (or, on the Free Trial, to upgrade).
 
 ## Evaluating agents in the builder
@@ -432,8 +449,8 @@ agent; sources are never mixed.
   written for the app and agent). Runs pair every mock user with
   every topic. At most 200 turns per batch, one batch at a time per app. Each
   turn uses two messages and each run one more for the evaluator, all on the
-  app owner's plan. It tests the version the test chat used when it started.
-  On Developer the owner's account can start 10 batches a month (all apps and
+  app admin's plan. It tests the version the test chat used when it started.
+  On Developer the admin's account can start 10 batches a month (all apps and
   teammates together; HTTP 402, `code: "batch_eval_limit"` past that, until
   the 1st). Enterprise has no limit.
 - **Compare** in the batch form tests up to four variants of one agent: each is a
@@ -459,16 +476,26 @@ agent; sources are never mixed.
   output tokens per second from its first text to its end, leaving out routing
   and tool calls. Time to first text and throughput are blank for replies that
   arrive in one piece (combo agents, forwarders, output other than chat). Mock
-  user and evaluator messages aren't counted. A batch comparing variants shows
-  each variant's speed. To find what is slow: a long time to first text with
+  user and evaluator messages aren't counted. **Cost per reply** is what the
+  agent's model calls cost for each reply (routing, tool steps and document
+  search included), as OpenRouter reports it, before Backprompter's fee. A batch
+  comparing variants shows each variant's speed and cost. To find what is slow: a long time to first text with
   normal throughput points to routing, retrieval, tool calls or a model slow to
   start; low throughput points to the model.
 - Batch runs have only the evaluator's score, so they show in the ratings when
   the Scores picker is set to that evaluator. "View all evaluations" lists every
   saved evaluation, filterable by agent, version, evaluator and source, and
   grouped by version with one average per evaluator and the group's speed; a row
-  opens its conversation. Its columns for first text, average reply and tokens
-  per second can be sorted. **Download report** opens a report of the evaluations
+  opens its conversation. Its columns for first text, average reply, tokens
+  per second and cost per reply can be sorted. **Compare versions** above the
+  list plots each version on two measures the developer picks (quality, their
+  rating, cost per reply, time to first text, reply time, tokens per second;
+  quality against cost at first). Quality there is one evaluator's average: the
+  evaluator filter's, or the one that scored the most. Each version has its own
+  colour; with grouping off, single evaluations show as faint dots too. Grouped
+  versions can be ordered by any of those measures. Evaluating an agent with
+  unsaved edits asks for a name for that version, offered again for the same
+  settings. **Download report** opens a report of the evaluations
   shown (filters applied): each version's averages, then every evaluation with
   its full verdict and the developer's note, ready to save as a PDF from the
   print dialog.
