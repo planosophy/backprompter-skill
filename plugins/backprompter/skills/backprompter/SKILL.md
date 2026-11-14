@@ -52,7 +52,7 @@ Every field, and what it does:
 | `model` | OpenRouter slug | Empty means `anthropic/claude-sonnet-4-5`. Must have a zero-data-retention provider on OpenRouter: every request asks for one, and a model without one fails with a message saying so. Browse the ones that do at https://openrouter.ai/models?zdr=true. |
 | `temperature` | 0–1 | Defaults to 0.7. |
 | `maxTokens` | number | Defaults to 3000. The builder's field caps at 4000. |
-| `artifactType` | `chat`, `markdown`, `html`, `charts`, `javascript` | `chat` is an ordinary reply. The others produce a document the app renders and can edit in place. |
+| `artifactType` | `chat`, `markdown`, `html`, `charts`, `javascript` | `chat` is an ordinary reply. The others produce a document the app renders and can edit in place. A `javascript` agent replies with JavaScript only, called directly or as a sub-agent: each reply is checked (compiled, never run on the server), a reply that isn't code gets one more try, and a second miss is an error. Math in chat and markdown replies is drawn with KaTeX when written as `$...$` or `\(...\)` inline, or `$$...$$` or `\[...\]` on its own. |
 | `isRoutable` | bool | Whether the router may pick this agent. Default true. |
 | `userContext` | bool | Whether the end user's profile is appended to the prompt. Default true. |
 | `ragSources` | array | See *Retrieval* below. |
@@ -135,6 +135,30 @@ and the combo's own tools). If the combo's model can't take tool calls (some
 image, search and older models on OpenRouter), the coordinator uses an older
 text format instead. In that case the combo's own tools, web access and
 documents are not used, and the builder shows a note under the model field.
+
+**Unfinished replies and Continue.** If the coordinator reaches the limit
+before the task is done, it answers with what it has so far and what is left.
+The result then has `unfinished: true` and a `checkpoint`: a short run id
+(`bpr_` + 22 characters). The run is saved on Backprompter's servers for 7
+days, works only for that app, and can be continued more than once (a failed
+request can be retried). In the builder and the hosted chat a **Continue**
+button appears under the answer. From the API, send `continue_from: <checkpoint>`
+to `/public/run` (`user_prompt` may be empty), or pass `continueFrom` to
+`run()` in either SDK; `autoContinue: n` makes the SDK continue up to n times
+(max 20) by itself. It carries on with a fresh limit and counts as a new
+message. These replies are not available on the older text format.
+
+**Code sub-agents.** A sub-agent with `artifactType: 'javascript'` writes code.
+The code runs in the browser over the user's data, never on the server: in the
+builder, in the hosted chat (a **Data (CSV)** button appears when the app has a
+code agent), and with the browser SDK (`run({ data: { name: csvText | rows } })`;
+the result has `codeRuns`, or `output` / `codeError` for a code agent called
+directly). The reply pauses with `pending_code`, the client runs it and sends
+`continue_from` + `code_results`; the coordinator gets the output or the error
+and carries on, for example asking for a fix. Code steps are not new messages;
+at most 10 code runs per reply. Server SDK callers pass `clientRunsCode: true`
+and run `pending_code` themselves; without it (and in Slack) the code comes back
+to the coordinator as text. Either way the sub-agent is given the request as a coding task and always replies with JavaScript; a failed run shows the coordinator the code next to the error.
 
 ## Tools
 
@@ -241,7 +265,7 @@ written before a tool call; clear it). Only chat answers stream: charts and
 other artifact types, combo agents, `genDiff` edits and forwarders arrive whole.
 The hosted chat streams by default; untick "Stream replies" in the Deploy dialog
 to turn it off. "Show intermediate steps" under it adds notes such as
-"Searching documents..." until the answer starts. The builder's test chat has its own pair of switches
+"Searching documents..." until the answer starts; for a combo agent, a note for each sub-agent it calls ("Using proof_digger..."). The builder's test chat has its own pair of switches
 above the message box, to see answers the way streaming users will.
 
 What the SDK exposes, by area:
