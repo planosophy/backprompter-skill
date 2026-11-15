@@ -272,10 +272,10 @@ What the SDK exposes, by area:
 
 - **auth** — `signIn`, `signUp`, `signOut`, `signInAnonymously`, `signInWithGoogle`, `signInWithSecret`, `signInWithCustomToken`, `signInWithExternalAuth`, `onAuthChange`, `currentUser`, `requestPasswordReset`
 - **running agents** — `run`, `runWithFiles`, `runWithApiKey`
-- **conversations** — `saveConversation`, `getConversation`, `listConversations`, `deleteConversation`
+- **conversations** — `saveConversation`, `getConversation`, `listConversations`, `deleteConversation`, `uploadConversationFile`
 - **artifacts** — `storeArtifacts`, `getArtifact`, `listArtifacts`, `deleteArtifact`
 - **app data** — `getData`, `deleteData`, `search` (vector search over conversations and artifacts)
-- **files** — `getPromptFileType`, `extractPromptFileText`, `readPromptFileAsDataUrl`, `buildPromptWithFiles`
+- **files** — `getPromptFileType`, `extractPromptFileText`, `readPromptFileAsDataUrl`, `buildPromptWithFiles`, `indexAttachment`, `deleteAttachmentIndex`
 - **voice** — `connectVoice`, `createVoiceAgent`
 - **payments** — `getEntitlements`, `createCheckoutSession`, `createBillingPortalSession`
 
@@ -305,6 +305,33 @@ if (!active) {
 - The hosted chat already shows subscribers a Manage subscription button.
 - A user who cancels and later subscribes again keeps their saved card.
 - `createBillingPortalSession` fails until the user has paid at least once.
+
+## Saving conversations
+
+`saveConversation(conversationId, messages, metadata)` keeps a transcript per
+end user; `getConversation`, `listConversations` and `deleteConversation` read
+and remove it. The same four exist on the server SDK's `forUser(...)`.
+
+- Save as often as you like, with the whole history or only the new messages:
+  the server appends what is new and leaves the rest untouched. Every stored
+  message gets an `id`, returned by the save; include ids on the messages you
+  send and they are matched by id, otherwise by content. `mode: 'append'` or
+  `mode: 'replace'` (fourth argument, `{ mode }`) says so outright.
+- A history the server compacted starts with a `Conversation summary (earlier
+  turns):` system message. Save it as it is: the summary is stored beside the
+  transcript (`summary` on the result and on `getConversation`), and the stored
+  messages stay whole.
+- A conversation can hold 5,000,000 characters; one message, 400,000. Long
+  conversations are stored in pages behind the scenes; `getConversation`
+  returns the whole transcript.
+- Uploaded files: with **Keep uploaded files** ticked in the Deploy dialog,
+  `uploadConversationFile(conversationId, file)` stores the file and returns
+  `{ uploadId, name, contentType, bytes }` to put on a message's `attachments`
+  in the next save; `getConversation` returns each with a short-lived `url`.
+  Storage is billed to the app owner as file storage. With the setting off (the
+  default), only attachment names are kept.
+- `search` finds conversations by meaning; the embedding covers the first
+  8,000 characters and is recomputed only when they change.
 
 ## Keeping your own login
 
@@ -559,6 +586,41 @@ The viewport tag matters on phones: without it the page lays out at ~980px and
 the browser zooms out, so the chat text comes out tiny.
 
 ## Attachments
+
+An attached file travels with each message it is attached to, not in the
+conversation history, so the model sees it whole for as long as it stays
+attached; removing it from the attachment list stops sending it. When a long
+history is compacted, attached-file text that an app kept in the history is
+kept word for word rather than summarized, and the reply's
+`additional_response.compaction` says how many recent messages were kept and
+what was put in front of them; mirror that if you keep your own copy of the
+history (the SDK's `runWithFiles` callers see the same field).
+
+A text file over 100,000 characters is not sent whole. The builder, the hosted
+chat and `runWithFiles` index it instead (one call, billed to the app owner like
+retrieval): it is cut into passages, embedded, and each message gets the
+passages that fit it best, so a question about any part of the file can be
+answered. The platform sets the longest file it will index (1,000,000
+characters unless the operator changed it); a longer one is refused with
+`code: 'attachment_too_large'` and sampled instead. The index expires after 7
+days. Spreadsheets and CSV files are cut by rows: every passage starts with the
+header line, and no row is split. In your own code:
+`indexAttachment({ name, text, kind })` returns an `indexId` to pass as
+`attachmentIndexes` with `run`, or put it on a `promptFiles` entry as
+`indexId`; `kind: 'table'` asks for row-wise cutting (the text is blocks
+separated by blank lines, each starting with its header line), `'text'` for
+paragraphs, and unset goes by the file name. `deleteAttachmentIndex(indexId)`
+removes it early. The server SDK has `indexAttachment` and
+`deleteAttachmentIndex` too, and `run` takes `attachmentIndexes`. If indexing
+fails, the file is sampled (its start, middle and end) as before. In the
+builder, files can also be dropped on the message box; a chip reads
+"(indexing…)" until the server is done, and the file is not sent before that.
+
+If the agent's model takes no images and images are attached (or were taken out
+of a deck or Word file), the request is sent again without them and the reply is
+based on the text; `additional_response.warnings` then holds
+`[{ code: 'images_dropped', message }]`, which the builder shows as a note above
+the reply. Show it in your own chat too, or pick a model with image input.
 
 A PDF whose meaning is in screenshots or scans is not represented by its text.
 The platform detects images and handles the file accordingly — small
