@@ -32,6 +32,7 @@ complete agent definition they paste in.
   "isRoutable": true,
   "userContext": true,
   "ragSources": ["scope:<collection-id>"],
+  "deepSearch": false,
   "webSearch": false,
   "webFetch": false,
   "toolRefs": [],
@@ -57,6 +58,7 @@ Every field, and what it does:
 | `userContext` | bool | Whether the end user's profile is appended to the prompt. Default true. |
 | `ragSources` | array | See *Retrieval* below. |
 | `webSearch` | bool | Appends `:online` to the model, so the provider searches the web. |
+| `deepSearch` | bool | In BRAG collections, a search agent decides what else to read and what to drop. Default false. See *Retrieval*. |
 | `webFetch` | bool | Lets the model fetch URLs it finds in the message. |
 | `toolRefs` | array | App-level tools, defined once on the app: an API tool's name, `mcp:<server>` for every tool an MCP server offers, or `mcp:<server>/<tool>` for one. See *Tools*. |
 | `mcpExposed` | bool | Offers the agent as a tool to MCP clients that hold one of the app's API keys. Default false. See *Calling agents from MCP clients*. |
@@ -90,6 +92,72 @@ the old version is searched until the new one is ready; if indexing fails, the
 old version stays. Replacing costs the same as uploading the file new, and a
 file attached whole can't grow past its size limit (index it first). Evaluations
 from before a replacement were run against the old version.
+
+**BRAG collections.** A collection can be made a BRAG collection in the Files
+window: pick it in the collection list and click **Index as BRAG**, or tick
+**as BRAG** when indexing files into a new collection. It is built from what is
+already indexed, so nothing is uploaded again, no model is called and it costs
+nothing. In a BRAG collection every passage is linked to the passage before and
+after it and to the heading it sits under. A search still finds the closest
+passages; then, for each one, it also brings back the passage before and after
+it in the same section and the passage that opens that section. The result is
+given to the agent in reading order, each passage headed by its section's full
+heading path. At most k passages are added, and at most half the text budget
+again, so a reply that draws on a BRAG collection can use more input tokens.
+Nothing changes in the agent JSON: `scope:<collection-id>` and `knowledgebase`
+work as before, and files added, replaced or moved into the collection are
+linked automatically. That includes large files, which are indexed as they are
+uploaded: they go to the collection picked in the list, or to a new one (BRAG
+if **as BRAG** is ticked). **Turn BRAG off** returns it to ordinary search.
+
+**Found links.** When a file is indexed into a BRAG collection, two more kinds
+of link are found for its passages, with no model call: *mentions*, a passage
+that names another section of its file ("see Section 4.5", "under Rate
+limits") or another file of the collection by its name or top heading, linked
+to the passage that opens it; and *similar*, each passage's nearest passages by
+their stored vectors, outside its own section and in any file of the
+collection (one nearest-neighbour lookup per passage; at most 3 per passage
+from similarity 0.6 up, both platform settings). The ordinary BRAG search does
+not follow these; deep search sees them beside the other links and judges from
+the preview whether to open one. They can be removed on the memory map, where a
+removed link stays removed when the file is indexed again, and new links can be
+drawn by hand (*related*) between any two passages of a collection.
+
+**Deep search** (`deepSearch: true`, or the Deep search tick on the agent)
+replaces that fixed rule with a judgement, for that agent only. A search agent
+is given the passages the search found, in full, and for each one its links:
+the kind of link (next passage, previous passage, start of its section, start
+of the section above, another section of the file, or a found or hand-made
+link: mentions, similar, related, which may lead into another file) and a
+short preview of what is at the other end. It then decides what to drop as unhelpful, which
+links to open, and whether to run one new search of its own; what it opens
+arrives in full with its own links, and it decides again. It takes at most 3
+steps (a platform setting), the last of which can only drop; it opens at most k
+passages per step and holds at most one and a half times the text budget. Each
+step is one call to a small model, charged like any other call, and adds a
+second or two to a reply that searches. It only does anything when a passage
+found is in a BRAG collection, and if the search agent fails the ordinary BRAG
+result is used. Use it for agents that answer from long, structured documents
+where the first passages found are rarely the whole answer; leave it off for
+quick FAQ-style agents.
+
+**Memory map** (Files window) draws every indexed collection as a graph, BRAG
+or not: the files first, then each file's sections, then the passages; click
+or zoom to open. Only BRAG collections have the links below.
+Found and hand-made links are the coloured lines (dashed for mentions, dotted
+for similar, solid for related), hidden or shown with the **Links** button; a
+link to a passage inside something closed points at what holds it. Click a
+link to see why it is there (what was mentioned, the similarity), tag it or
+remove it; a passage's panel lists its links and has **Link it to another
+passage…** to draw one. Files, sections, passages and the links between them
+can be tagged there, and the Find box searches names, passage text and tags. In the builder's Show
+sources, a reply that drew on a BRAG collection says what the search did (what
+it started from, what it opened through links, any new search, what it dropped
+and why) and marks each added passage with how it was reached. Whenever a
+reply retrieved passages, from any collection, the panel has two tabs:
+**Passages**, the list, and **Map**, the search drawn on the memory map inside
+the panel; clicking a passage there shows it as the list does, with the
+sentences the answer rests on marked, and **Full screen** opens the whole map.
 
 Two behaviours worth designing around:
 
@@ -630,3 +698,24 @@ extracted, described and indexed. Nothing in the agent JSON controls this.
 When retrieval attaches a file, the system prompt names it as attached by the
 app. Do not write instructions telling the agent to discuss "the file the user
 sent" — it may not have come from them.
+
+## Using Claude Code or another assistant to build on Backprompter
+
+This document is the Backprompter skill, published at
+github.com/planosophy/backprompter-skill (MIT). A developer who wants Claude
+Code to write agents, wire the SDKs or call the API for them installs it with:
+
+```
+/plugin marketplace add planosophy/backprompter-skill
+/plugin install backprompter@planosophy
+```
+
+Claude Code then uses it whenever they work on a Backprompter app;
+`/plugin marketplace update planosophy` picks up new versions. Without the
+plugin, the file can be saved as `.claude/skills/backprompter/SKILL.md` in one
+project, or under `~/.claude/skills/backprompter/` for every project (the raw
+file is at
+raw.githubusercontent.com/planosophy/backprompter-skill/main/plugins/backprompter/skills/backprompter/SKILL.md).
+It is plain Markdown, so Cursor, a Claude Project or any assistant that takes
+project knowledge can use it as a reference too. The builder's own copilot
+answers from this same file, plus a summary of the screen.
