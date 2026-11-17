@@ -9,6 +9,10 @@ Backprompter hosts AI agents. A developer defines agents in the builder, then
 calls them from their own frontend or backend. You can write an agent as JSON
 for them to upload, and write the code that talks to it.
 
+The builder, where developers sign in or create an account, is
+https://app.backprompter.com. The website, pricing and developer docs are on
+https://backprompter.com (for example https://backprompter.com/docs.html).
+
 **Two things you cannot do from here:** you cannot see their app, and you cannot
 guess ids. App Key, collection ids and document ids come from their builder —
 ask rather than invent. Anything named `scope:...` or a bare document id in the
@@ -289,8 +293,8 @@ give it `toolRefs`:
   agent can't become a forwarder, and a forwarder can't become anything else.
   So `"role"` is read only when an uploaded JSON creates a new agent; importing
   it onto an existing agent as a version leaves the role as it was.
-- Billing: the usual per-message fee plus one model call to fill in the tool
-  call.
+- Billing: the usual agent call plus one model call to fill in the tool call.
+  The forwarded call itself is not charged as a lookup.
 
 ## Choosing a model
 
@@ -457,7 +461,7 @@ the builder, bound to one app, and capped at 10 active per app; the admin can
 revoke them in the Deploy dialog. The server SDK has no payments and no
 end-user auth — there is no signed-in user in that context.
 
-API keys need a paid plan (Developer or Enterprise). A call is refused with
+API keys need a paid plan (Solo Dev, Teams or Enterprise). A call is refused with
 HTTP 402 when the app's admin can't pay for it, for example when they are out
 of credits; handle that rather than retrying.
 
@@ -465,13 +469,53 @@ Plans: the **Free Trial** gets up to 2 agents and a lifetime allowance of 50
 messages or $1 of model usage, whichever comes first, and must verify its email
 first (HTTP 403, `code: "email_not_verified"`). It cannot deploy in any form
 (chat, API keys, MCP, Slack), invite teammates or set policies; those answer
-HTTP 402 with `code: "upgrade_required"`. **Developer** (monthly, from credits)
-lifts the limits, deploys, and invites up to 5 editors per app, with 10 batch
-evaluations a month. **Enterprise** (set up by Backprompter) adds auditors, 10
-collaborators per app by default, admin switches, and no batch limit. Accounts
-that were on Dev Pro are Enterprise; the old Hobby plan is the Free Trial.
+HTTP 402 with `code: "upgrade_required"`. **Solo Dev** ($5 a month, from
+credits) lifts the limits and deploys; it includes one person (the owner), and
+each person invited past that is $29 a month, charged at the invite and with
+each monthly fee. **Teams** ($129) includes 25 people and 25,000 agent calls a
+month (the agent call fee is waived; lookups and model cost are not), and is
+the first plan with BRAG (BRAG collections and deep search; elsewhere they are
+refused with 402 `upgrade_required`, and an existing BRAG collection is
+searched like any other). **Enterprise** (set up by Backprompter; $5,000 or an
+agreed price) adds auditors, admin switches, 1,000 people and 250,000 agent
+calls included, and no batch limit; invites past its people are refused (409
+`member_limit`). People are counted once each across all the owner's apps,
+pending invites included. Batch evaluations a day: 5 on the Free Trial and
+Solo Dev, 20 on Teams (402 `batch_eval_limit` past it). Owners move between
+Solo Dev and Teams in the account window: up starts a new month at once,
+charged in full; down happens when the paid month ends; nobody goes back to
+the Free Trial, and credits are not refundable. One credit purchase must be at
+least the monthly bill (plan plus extra people) plus $5; on the Free Trial,
+Solo Dev's price plus $5. Accounts that were on
+Developer are Solo Dev, Dev Pro is Enterprise, and the old Hobby plan is the
+Free Trial. An account Backprompter priced on its own (usually Enterprise)
+sees that price in its account window, and credits Backprompter adds by hand
+(for testing or early adopters) are listed there with their note.
+On the paid plans, use is charged from credits in two prices. An **agent call**
+($0.015) is each agent reply: one per message, plus one for each sub-agent a
+combo agent calls. A **lookup** ($0.01) is added for each call to one of the
+app's own tools (API or MCP), each model request made with web search on, each
+reply grounded in the app's files (RAG or BRAG: one per reply, however many
+passages), and each file attached to the message, on every message it is sent
+with (images taken out of a document count with the document). Model cost
+(including routing, summaries and other steps behind a reply) is passed through
+at what OpenRouter charges, with no markup; with the app's own OpenRouter key
+the tokens go on that key. Storage is $0.05 per MB per month, and deploying an
+app is a one-time $10. An embedding from `/public/embed` is one lookup. The Free
+Trial pays no per-use fees.
 Prices and these numbers can change, so take current figures from the Billing
 window or the pricing page.
+
+**Auto top-up** (paid plans: Solo Dev, Teams and Enterprise): in the Billing
+window, under Credits, the developer saves a card on a Stripe page that charges
+nothing, then chooses when to top up ("when credits fall below $5"), how many
+credits to add each time (the same minimum as buying by hand: the monthly bill
+plus $5), and the most to add in one month. Whenever the
+balance drops below that amount, Backprompter charges the saved card and adds
+the credits, so deployed apps don't stop at $0. A declined card, or a bank
+that wants the cardholder to approve the payment, turns auto top-up off and
+the Billing window says why; reaching the monthly limit only pauses it until
+next month. It can be turned off, or the card changed or removed, at any time.
 
 ## Calling agents from MCP clients
 
@@ -569,9 +613,10 @@ agent; sources are never mixed.
   every topic. At most 200 turns per batch, one batch at a time per app. Each
   turn uses two messages and each run one more for the evaluator, all on the
   app admin's plan. It tests the version the test chat used when it started.
-  On Developer the admin's account can start 10 batches a month (all apps and
-  teammates together; HTTP 402, `code: "batch_eval_limit"` past that, until
-  the 1st). Enterprise has no limit.
+  The admin's account can start 5 batches a day on the Free Trial and Solo
+  Dev and 20 on Teams (all apps and teammates together; HTTP 402,
+  `code: "batch_eval_limit"` past that, until midnight UTC). Enterprise has
+  no limit.
 - **Compare** in the batch form tests up to four variants of one agent: each is a
   version (current, deployed, or a saved version) plus an optional model that
   applies to this batch only and is never saved. Every variant gets the same
@@ -597,7 +642,7 @@ agent; sources are never mixed.
   arrive in one piece (combo agents, forwarders, output other than chat). Mock
   user and evaluator messages aren't counted. **Cost per reply** is what the
   agent's model calls cost for each reply (routing, tool steps and document
-  search included), as OpenRouter reports it, before Backprompter's fee. A batch
+  search included), as OpenRouter reports it, without agent call or lookup fees. A batch
   comparing variants shows each variant's speed and cost. To find what is slow: a long time to first text with
   normal throughput points to routing, retrieval, tool calls or a model slow to
   start; low throughput points to the model.
