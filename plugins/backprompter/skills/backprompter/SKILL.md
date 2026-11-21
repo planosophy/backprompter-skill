@@ -62,7 +62,7 @@ Every field, and what it does:
 | `userContext` | bool | Whether the end user's profile is appended to the prompt. Default true. |
 | `ragSources` | array | See *Retrieval* below. |
 | `webSearch` | bool | Appends `:online` to the model, so the provider searches the web. |
-| `deepSearch` | bool | In BRAG collections, a search agent decides what else to read and what to drop. Default false. See *Retrieval*. |
+| `deepSearch` | bool | Digs further in BRAG collections when a question needs it. Default false. See *Retrieval*. |
 | `webFetch` | bool | Lets the model fetch URLs it finds in the message. |
 | `toolRefs` | array | App-level tools, defined once on the app: an API tool's name, `mcp:<server>` for every tool an MCP server offers, or `mcp:<server>/<tool>` for one. See *Tools*. |
 | `mcpExposed` | bool | Offers the agent as a tool to MCP clients that hold one of the app's API keys. Default false. See *Calling agents from MCP clients*. |
@@ -97,71 +97,40 @@ old version stays. Replacing costs the same as uploading the file new, and a
 file attached whole can't grow past its size limit (index it first). Evaluations
 from before a replacement were run against the old version.
 
-**BRAG collections.** A collection can be made a BRAG collection in the Files
-window: pick it in the collection list and click **Index as BRAG**, or tick
-**as BRAG** when indexing files into a new collection. It is built from what is
-already indexed, so nothing is uploaded again, no model is called and it costs
-nothing. In a BRAG collection every passage is linked to the passage before and
-after it and to the heading it sits under. A search still finds the closest
-passages; then, for each one, it also brings back the passage before and after
-it in the same section and the passage that opens that section. The result is
-given to the agent in reading order, each passage headed by its section's full
-heading path. At most k passages are added, and at most half the text budget
-again, so a reply that draws on a BRAG collection can use more input tokens.
-Nothing changes in the agent JSON: `scope:<collection-id>` and `knowledgebase`
-work as before, and files added, replaced or moved into the collection are
-linked automatically. That includes large files, which are indexed as they are
-uploaded: they go to the collection picked in the list, or to a new one (BRAG
-if **as BRAG** is ticked). **Turn BRAG off** returns it to ordinary search.
-
-**Found links.** When a file is indexed into a BRAG collection, two more kinds
-of link are found for its passages, with no model call: *mentions*, a passage
-that names another section of its file ("see Section 4.5", "under Rate
-limits") or another file of the collection by its name or top heading, linked
-to the passage that opens it; and *similar*, each passage's nearest passages by
-their stored vectors, outside its own section and in any file of the
-collection (one nearest-neighbour lookup per passage; at most 3 per passage
-from similarity 0.6 up, both platform settings). The ordinary BRAG search does
-not follow these; deep search sees them beside the other links and judges from
-the preview whether to open one. They can be removed on the memory map, where a
-removed link stays removed when the file is indexed again, and new links can be
-drawn by hand (*related*) between any two passages of a collection.
+**BRAG collections.** BRAG gives a collection a connected memory, so agents
+answer from the full context around what they find, across sections and files.
+A collection can be made a BRAG collection in the Files window: pick it in the
+collection list and click **Index as BRAG**, or tick **as BRAG** when indexing
+files into a new collection. It is built from what is already indexed, so
+nothing is uploaded again and it costs nothing. A reply that draws on a BRAG
+collection can use more input tokens. Nothing changes in the agent JSON:
+`scope:<collection-id>` and `knowledgebase` work as before, and files added,
+replaced or moved into the collection are included automatically. That includes
+large files, which are indexed as they are uploaded: they go to the collection
+picked in the list, or to a new one (BRAG if **as BRAG** is ticked). **Turn
+BRAG off** returns it to ordinary search.
 
 **Deep search** (`deepSearch: true`, or the Deep search tick on the agent)
-replaces that fixed rule with a judgement, for that agent only. A search agent
-is given the passages the search found, in full, and for each one its links:
-the kind of link (next passage, previous passage, start of its section, start
-of the section above, another section of the file, or a found or hand-made
-link: mentions, similar, related, which may lead into another file) and a
-short preview of what is at the other end. It then decides what to drop as unhelpful, which
-links to open, and whether to run one new search of its own; what it opens
-arrives in full with its own links, and it decides again. It takes at most 3
-steps (a platform setting), the last of which can only drop; it opens at most k
-passages per step and holds at most one and a half times the text budget. Each
-step is one call to a small model, charged like any other call, and adds a
-second or two to a reply that searches. It only does anything when a passage
-found is in a BRAG collection, and if the search agent fails the ordinary BRAG
-result is used. Use it for agents that answer from long, structured documents
-where the first passages found are rarely the whole answer; leave it off for
-quick FAQ-style agents.
+makes that agent dig further in BRAG collections when a question needs it, and
+leave out what does not belong. It adds a few model calls, charged like any
+other call, and a second or two to a reply that searches. It only does anything
+when the search reaches a BRAG collection. Use it for agents that answer from
+long, structured documents where the first passages found are rarely the whole
+answer; leave it off for quick FAQ-style agents.
 
 **Memory map** (Files window) draws every indexed collection as a graph, BRAG
 or not: the files first, then each file's sections, then the passages; click
-or zoom to open. Only BRAG collections have the links below.
-Found and hand-made links are the coloured lines (dashed for mentions, dotted
-for similar, solid for related), hidden or shown with the **Links** button; a
-link to a passage inside something closed points at what holds it. Click a
-link to see why it is there (what was mentioned, the similarity), tag it or
-remove it; a passage's panel lists its links and has **Link it to another
-passage…** to draw one. Files, sections, passages and the links between them
-can be tagged there, and the Find box searches names, passage text and tags. In the builder's Show
-sources, a reply that drew on a BRAG collection says what the search did (what
-it started from, what it opened through links, any new search, what it dropped
-and why) and marks each added passage with how it was reached. Whenever a
-reply retrieved passages, from any collection, the panel has two tabs:
-**Passages**, the list, and **Map**, the search drawn on the memory map inside
-the panel; clicking a passage there shows it as the list does, with the
-sentences the answer rests on marked, and **Full screen** opens the whole map.
+or zoom to open. In BRAG collections, coloured lines are connections between
+passages, found by BRAG or drawn by hand, hidden or shown with the **Links**
+button. Click a link to see why it is there, tag it or remove it (a removed
+link stays removed when the file is indexed again); a passage's panel has
+**Link it to another passage…** to draw one. Files, sections, passages and
+links can be tagged there, and the Find box searches names, passage text and
+tags. In the builder's **Show sources**, whenever a reply retrieved passages,
+the panel has two tabs: **Passages**, the list, and **Map**, those passages on
+the memory map inside the panel; clicking a passage there shows it as the list
+does, with the sentences the answer rests on marked, and **Full screen** opens
+the whole map.
 
 Two behaviours worth designing around:
 
@@ -462,36 +431,39 @@ revoke them in the Deploy dialog. The server SDK has no payments and no
 end-user auth — there is no signed-in user in that context.
 
 API keys need a paid plan (Solo Dev, Teams or Enterprise). A call is refused with
-HTTP 402 when the app's admin can't pay for it, for example when they are out
-of credits; handle that rather than retrying.
+HTTP 402 when the app's admin can't pay for it, for example when their balance
+has run out; handle that rather than retrying.
 
 Plans: the **Free Trial** gets up to 2 agents and a lifetime allowance of 50
 messages or $1 of model usage, whichever comes first, and must verify its email
 first (HTTP 403, `code: "email_not_verified"`). It cannot deploy in any form
 (chat, API keys, MCP, Slack), invite teammates or set policies; those answer
 HTTP 402 with `code: "upgrade_required"`. **Solo Dev** ($5 a month, from
-credits) lifts the limits and deploys; it includes one person (the owner), and
+the balance) lifts the limits and deploys; it includes one person (the owner), and
 each person invited past that is $29 a month, charged at the invite and with
 each monthly fee. **Teams** ($129) includes 25 people and 25,000 agent calls a
 month (the agent call fee is waived; lookups and model cost are not), and is
 the first plan with BRAG (BRAG collections and deep search; elsewhere they are
 refused with 402 `upgrade_required`, and an existing BRAG collection is
-searched like any other). **Enterprise** (set up by Backprompter; $5,000 or an
-agreed price) adds auditors, admin switches, 1,000 people and 250,000 agent
+searched like any other). **Enterprise** (set up by Backprompter; price on
+request) adds auditors, admin switches, 1,000 people and 250,000 agent
 calls included, and no batch limit; invites past its people are refused (409
 `member_limit`). People are counted once each across all the owner's apps,
 pending invites included. Batch evaluations a day: 5 on the Free Trial and
 Solo Dev, 20 on Teams (402 `batch_eval_limit` past it). Owners move between
 Solo Dev and Teams in the account window: up starts a new month at once,
 charged in full; down happens when the paid month ends; nobody goes back to
-the Free Trial, and credits are not refundable. One credit purchase must be at
-least the monthly bill (plan plus extra people) plus $5; on the Free Trial,
-Solo Dev's price plus $5. Accounts that were on
+the Free Trial, and money added to the balance is not refundable. Moving up
+needs a balance of twice the new plan's monthly bill first ($10 Solo Dev, $258 Teams, plus twice any
+extra people; HTTP 402 `code: "needs_credits"` with `need`, `have` and
+`short` otherwise), and adding to the balance, by hand or automatically, must
+leave at least twice the monthly bill and is never under $5. Accounts that were on
 Developer are Solo Dev, Dev Pro is Enterprise, and the old Hobby plan is the
 Free Trial. An account Backprompter priced on its own (usually Enterprise)
-sees that price in its account window, and credits Backprompter adds by hand
+sees that price in its account window, and money Backprompter adds by hand
 (for testing or early adopters) are listed there with their note.
-On the paid plans, use is charged from credits in two prices. An **agent call**
+On the paid plans, use is charged from the balance (prepaid, in dollars; the
+builder calls it Balance) in two prices. An **agent call**
 ($0.015) is each agent reply: one per message, plus one for each sub-agent a
 combo agent calls. A **lookup** ($0.01) is added for each call to one of the
 app's own tools (API or MCP), each model request made with web search on, each
@@ -506,13 +478,26 @@ Trial pays no per-use fees.
 Prices and these numbers can change, so take current figures from the Billing
 window or the pricing page.
 
-**Auto top-up** (paid plans: Solo Dev, Teams and Enterprise): in the Billing
-window, under Credits, the developer saves a card on a Stripe page that charges
-nothing, then chooses when to top up ("when credits fall below $5"), how many
-credits to add each time (the same minimum as buying by hand: the monthly bill
-plus $5), and the most to add in one month. Whenever the
+Where to see what was used: the account window (the balance badge) has tabs
+for Plan, Balance, People and Usage; Usage shows charges for the last 30 or
+90 days, 12 months or all time (kept for good), and a model
+table (calls, tokens and cost per model, own-key calls apart). The Usage
+button in the builder's Users section opens, for the deployed app (hosted
+chat, SDK, API key, MCP, not builder test chats), each agent and each end user
+with messages and what they cost the app owner, this month and all time. API key calls show as one
+row, since they have no signed-in user.
+
+**Auto top-up** (paid plans: Solo Dev, Teams and Enterprise): in the account
+window, under Balance, the developer saves a card on a Stripe page that charges
+nothing, then chooses when to top up ("when the balance falls below $5"), how
+much to add each time (at least $5), and the most to add in one month. The
+point plus the amount must keep the plan's minimum balance ($10 Solo Dev, $258
+Teams), and the monthly limit must allow one top-up; saving less is refused
+(HTTP 400 `code: "auto_top_up_too_low"` with suggested numbers), and moving
+up a plan with auto top-up too low is refused the same way (409) while the
+account window offers to raise it, or cancels the move. Whenever the
 balance drops below that amount, Backprompter charges the saved card and adds
-the credits, so deployed apps don't stop at $0. A declined card, or a bank
+to the balance, so deployed apps don't stop at $0. A declined card, or a bank
 that wants the cardholder to approve the payment, turns auto top-up off and
 the Billing window says why; reaching the monthly limit only pauses it until
 next month. It can be turned off, or the card changed or removed, at any time.
@@ -626,7 +611,7 @@ agent; sources are never mixed.
   a side-by-side table of scores per mock user and topic.
 - A batch keeps running if the builder is closed; its progress shows under the
   ratings while it runs, with Cancel (chats under way finish, the rest are
-  skipped). Running out of credits stops it. If the servers restart meanwhile,
+  skipped). Running out of balance stops it. If the servers restart meanwhile,
   the batch pauses and continues the next time the builder is opened. Results,
   including past batches, list each run's mock user, topic, turns, score and
   speed; a run opens its conversation and verdict, with each reply's times and
