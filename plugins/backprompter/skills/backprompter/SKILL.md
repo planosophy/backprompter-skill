@@ -457,7 +457,20 @@ the Free Trial, and money added to the balance is not refundable. Moving up
 needs a balance of twice the new plan's monthly bill first ($10 Solo Dev, $258 Teams, plus twice any
 extra people; HTTP 402 `code: "needs_credits"` with `need`, `have` and
 `short` otherwise), and adding to the balance, by hand or automatically, must
-leave at least twice the monthly bill and is never under $5. Accounts that were on
+leave at least twice the monthly bill and is never under $5. A **promo code**,
+entered in the Plan tab ("Promo code", Apply, at the top under the plan name;
+while a promo runs, the balance button shows "Enter promo code to get
+discounts" until it is clicked) or carried by a sign-up link
+ending `?promo=CODE`, takes money off the plan fee of the first month when the
+account moves up, and lowers the balance needed to move up by the same amount;
+each account can use a code once per plan. BLACKFRIDAY runs until 30 November
+2026, 11:59 pm AOE: Solo Dev's first month free ($5 off, so $5 to start) and
+half off Teams' first month ($64.50 off, so $193.50 to start), for the first
+100 accounts that move up with it (each counted once; after that the code
+gives nothing and saving it is refused with 400 `promo_full`). The API is
+`PUT /api/billing/promo` with `{ "code": "..." }` (empty removes it; 400
+`promo_unknown` or `promo_ended`), and `GET /api/billing` returns `promo` and
+`plans[t].promo` with `firstMonthPrice`. Accounts that were on
 Developer are Solo Dev, Dev Pro is Enterprise, and the old Hobby plan is the
 Free Trial. An account Backprompter priced on its own (usually Enterprise)
 sees that price in its account window, and money Backprompter adds by hand
